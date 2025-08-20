@@ -1,47 +1,59 @@
 """Main code for Chester"""
 # first-party imports
 import logging
-import requests
+import os
 
 # third-party imports
 import dotenv
+import discord
+from discord.ext import commands
+
 
 # global variables
 DISCORD_API_VERSION = 10
 DISCORD_API_ENDPOINT_BASE_URL = f"https://discord.com/api/v{DISCORD_API_VERSION}"
 LOGGING_DESTINATION = "logs/chester.log"
 
-import discord
+# set up discord intents
+INTENTS = discord.Intents.default()
+INTENTS.message_content = True
 
-class MyClient(discord.Client):
-    async def on_ready(self):
-        print('Logged on as', self.user)
+# set up bot prefix
+BOT = commands.Bot(command_prefix='>', intents=INTENTS)
 
-    async def on_message(self, message):
-        # don't respond to ourselves
-        if message.author == self.user:
-            return
+# bot commands
+@BOT.command()
+async def ping(ctx):
+    """basic example of creating a command and a reply"""
+    await ctx.send('pong')
 
-        if message.content == 'ping':
-            await message.channel.send('pong')
+def main():
+    """driver code for chester"""
 
-intents = discord.Intents.default()
-intents.message_content = True
-client = MyClient(intents=intents)
-client.run('token')
-
-if __name__ == "__main__":
+    # load env
     dotenv.load_dotenv()
+
+    # make handlers
     filehandler = logging.FileHandler(
         filename=LOGGING_DESTINATION,
         mode="w",
         encoding="utf8",
     )
     streamhandler = logging.StreamHandler()
+
+    # set up logging with handlers
     logging.basicConfig(
         handlers=[
             filehandler, streamhandler
         ],
         level=logging.DEBUG
     )
-    logging.info("Hello Logging!")
+
+    # run the bot
+    logging.info("Starting discord bot")
+    BOT.run(os.environ.get("DISCORD_BOT_TOKEN"))
+    logging.info("Script finish")
+
+if __name__ == "__main__":
+    # call main function on direct run for script
+    main()
