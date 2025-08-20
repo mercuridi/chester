@@ -1,2 +1,5 @@
 pytest
 pylint
+dotenv
+discord.py[voice]
+pynacl

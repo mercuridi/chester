@@ -1,1 +1,3 @@
-dummyline
+.env
+.venv
+*.log
