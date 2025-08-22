@@ -1,3 +1,5 @@
 .env
 .venv
-*.log
+logs/*.log
+library/*.m4a
+.DS_Store
