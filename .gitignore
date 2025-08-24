@@ -1,5 +1,9 @@
+.DS_Store
+
 .env
 .venv
-logs/*.log
-library/*.m4a
-.DS_Store
+
+*.log
+*.m4a
+*.mp4
+*.json
