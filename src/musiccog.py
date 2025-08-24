@@ -94,12 +94,19 @@ class MusicCog(commands.Cog):
 
     @commands.command(name="registerbreak")
     async def cmd_registerbreak(self, ctx, *args):
-        with open("library/config/break.json", "r", encoding="utf-8") as read_handle:
-            break_dict = json.loads(read_handle)
-            break_dict[ctx.author] = args[0]
-        with open("library/config/break.json", "w", encoding="utf-8") as write_handle:
-            json.dump(break_dict, write_handle, ensure_ascii=False, indent=4)
-        await ctx.send(f"Registered {ctx.author.mention}'s break music as id {args[0]}")
+        breakpath = "library/config/break.json"
+        if os.path.exists(breakpath):
+            with open(breakpath, "r", encoding="utf-8") as read_handle:
+                read_data = read_handle.read()
+                break_dict = json.loads(read_data)
+        else:
+            break_dict = {}
+
+        break_dict[str(ctx.author.id)] = str(args[0])
+
+        with open(breakpath, "w+", encoding="utf-8") as write_handle:
+            json.dump(break_dict, write_handle, ensure_ascii=False)
+        await ctx.send(f"Registered {ctx.author.mention}'s break music as id `{args[0]}`")
 
 
     @commands.command(name="library")
