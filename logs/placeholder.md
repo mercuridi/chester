@@ -1,1 +1,1 @@
-This is a placeholder file so that the logs directory exists in the git repo
+This is a placeholder file so that the `logs` directory exists in the git repo
