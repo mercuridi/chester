@@ -107,27 +107,27 @@ class MusicCog(commands.Cog):
             await ctx.send(f"{ctx.message.author.mention} You are not connected to a voice channel.")
             return
 
-        voice = discord.utils.get(self.voice_clients, guild=ctx.guild)
+        voice = ctx.voice_client
         if voice and voice.is_connected():
             await voice.move_to(channel)
         else:
             voice = await channel.connect()
 
         track_name = ' '.join(args)
-        source = discord.FFmpegPCMAudio(f"library/{track_name}.m4a")
-        if self.loop_enabled is True:
-            while self.loop_enabled:
-                player = voice.play(source)
-                while not player.is_done():
-                    await asyncio.sleep(1)
-        else:
-            player = voice.play(source)
-            while not player.is_done():
-                await asyncio.sleep(1)
+        track_file = f"library/{track_name}.m4a"
+        # keep looping until someone flips the flag off
+        while True:
+            source = discord.FFmpegPCMAudio(track_file)
+            ctx.voice_client.play(source)
+            # wait for this play to finish
+            while ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
+                await asyncio.sleep(0.5)
+            # break out if looping is disabled
+            if not self.loop_enabled:
+                break
 
         # disconnect after the player has finished
-        player.stop()
-        await voice.disconnect()
+        await ctx.voice_client.disconnect()
 
 async def setup(bot):
     await bot.add_cog(MusicCog(bot))
