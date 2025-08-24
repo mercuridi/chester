@@ -57,6 +57,13 @@ class MusicCog(commands.Cog):
         self.library = df
 
 
+    def get_title_from_id(self, given_id):
+        found = self.library.loc[self.library['id'] == given_id]["title"]
+        if len(found) == 0:
+            raise RuntimeError("The requested ID was not found in the library")
+        return found.iloc[0]
+
+
     def hook(self, d):
         if d["status"] == "downloading":
             logging.info("%s %s", d['filename'], d['_percent_str'])
@@ -94,6 +101,11 @@ class MusicCog(commands.Cog):
 
     @commands.command(name="registerbreak")
     async def cmd_registerbreak(self, ctx, *args):
+        given_id = args[0]
+        if given_id not in self.library["id"].values:
+            await ctx.send(f"{ctx.author.mention} The ID `{given_id}` does not correspond to a known track.")
+            return
+
         breakpath = "library/config/break.json"
         if os.path.exists(breakpath):
             with open(breakpath, "r", encoding="utf-8") as read_handle:
@@ -102,11 +114,11 @@ class MusicCog(commands.Cog):
         else:
             break_dict = {}
 
-        break_dict[str(ctx.author.id)] = str(args[0])
+        break_dict[str(ctx.author.id)] = given_id
 
         with open(breakpath, "w+", encoding="utf-8") as write_handle:
             json.dump(break_dict, write_handle, ensure_ascii=False)
-        await ctx.send(f"Registered {ctx.author.mention}'s break music as id `{args[0]}`")
+        await ctx.send(f"Registered {ctx.author.mention}'s break music as `{self.get_title_from_id(given_id)}`")
 
 
     @commands.command(name="library")
