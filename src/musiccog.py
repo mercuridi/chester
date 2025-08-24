@@ -6,12 +6,14 @@ import logging
 import os
 import asyncio
 import glob
+import json
 
 # third-party imports
 import pandas as pd
 import yt_dlp
 import discord
 from discord.ext import commands
+from tabulate import tabulate
 
 class MusicCog(commands.Cog):
     def __init__(self, bot):
@@ -19,16 +21,40 @@ class MusicCog(commands.Cog):
         self.loop_enabled = False
         self.metadata_columns = [
             "id",
-            "display_id",
             "title",
             "channel",
             "upload_date",
             "duration_string"
         ]
         self.library = self.load_library()
+        logging.info(self.library)
+        self.max_column_width = 30
+
+
+    def truncate(self, s):
+        return s if len(s) <= self.max_column_width else s[:self.max_column_width] + "…"
+
 
     def load_library(self):
-        return None
+        df = pd.DataFrame(columns=self.metadata_columns)
+        metadata_files = glob.glob('library/metadata/*.json')
+        metadata = []
+        for file_path in metadata_files:
+            logging.info(file_path)
+            file_id = file_path.split("/")[2].split(".")[0]
+            if not os.path.isfile(f"library/audio/{file_id}.m4a"):
+                raise FileNotFoundError(f"Expected to find a matching audio file for metadata file {file_id}")
+
+            with open(file_path, 'r', encoding="utf8") as file_handle:
+                file_data = file_handle.read()
+                metadata_dict = json.loads(file_data)
+                file_data_list = []
+                for key in self.metadata_columns:
+                    file_data_list.append(metadata_dict[key])
+                metadata.append(file_data_list)
+
+        df = pd.DataFrame(metadata, columns=self.metadata_columns)
+        return df
 
 
     def hook(self, d):
@@ -65,10 +91,31 @@ class MusicCog(commands.Cog):
         logging.error("File download failed")
         raise RuntimeError("A file download failed")
 
+    @commands.command(name="library")
+    async def cmd_library(self, ctx):
+        library_display = self.library.copy()
+        library_display["duration"] = library_display["duration_string"]
+        library_display = library_display.drop(
+            labels=[
+                "upload_date",
+                "duration_string",
+                "channel",
+                "duration"
+            ], axis="columns"
+        )
+        library_display["title"] = library_display["title"].apply(self.truncate)
+        table = tabulate(library_display, headers="keys",
+                        tablefmt="rounded_outline",
+                        showindex=False)
+
+        msg = (
+            f"{ctx.author.mention} Available library:\n"
+            f"```{table}```"
+        )
+        await ctx.send(msg)
 
     @commands.command(name="loop")
     async def cmd_loop(self, ctx):
-        # self.loop_enabled lives on your Bot instance
         self.loop_enabled = not self.loop_enabled
         status = "enabled" if self.loop_enabled else "disabled"
         await ctx.send(f"{ctx.author.mention} Loop {status}")

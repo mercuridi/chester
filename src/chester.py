@@ -25,7 +25,7 @@ async def main():
     # ——— set up logging ———
     filehandler = logging.FileHandler(LOGGING_DESTINATION, mode="w", encoding="utf8")
     streamhandler = logging.StreamHandler()
-    logging.basicConfig(handlers=[filehandler, streamhandler], level=logging.DEBUG)
+    logging.basicConfig(handlers=[filehandler, streamhandler], level=logging.INFO)
 
     # ——— create the bot ———
     intents = discord.Intents.default()

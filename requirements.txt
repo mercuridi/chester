@@ -5,3 +5,4 @@ discord.py[voice]
 pynacl
 yt-dlp
 pandas
+tabulate
