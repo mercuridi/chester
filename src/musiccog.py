@@ -8,19 +8,63 @@ import asyncio
 import glob
 
 # third-party imports
-import discord
+import pandas as pd
 import yt_dlp
+import discord
 from discord.ext import commands
 
 class MusicCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.loop_enabled = False
+        self.metadata_columns = [
+            "id",
+            "display_id",
+            "title",
+            "channel",
+            "upload_date",
+            "duration_string"
+        ]
+        self.library = self.load_library()
+
+    def load_library(self):
+        return None
+
+
     def hook(self, d):
         if d["status"] == "downloading":
             logging.info("%s %s", d['filename'], d['_percent_str'])
         elif d["status"] == "finished":
             logging.info("%s %s", d['filename'], d['_percent_str'])
+
+
+    def download_m4a(self, url):
+        ydl_opts = {
+            'format': 'm4a/bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'm4a',
+            }],
+            "outtmpl": 'library/audio/%(id)s',
+            'noplaylist': True, # disables getting playlist
+            'progress_hooks': [self.hook], # adds the progress hook
+            'print_to_file': { # enables json output for metadata
+                'video': [
+                    # defines the json output format and destination
+                    (f'%(.{",".join(self.metadata_columns)})#j',
+                    'library/metadata/%(id)s.json')
+                ]
+            }
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            ydl.process_info(info) # triggers download
+            return ydl.prepare_filename(info)
+
+        logging.error("File download failed")
+        raise RuntimeError("A file download failed")
+
 
     @commands.command(name="loop")
     async def cmd_loop(self, ctx):
@@ -28,6 +72,7 @@ class MusicCog(commands.Cog):
         self.loop_enabled = not self.loop_enabled
         status = "enabled" if self.loop_enabled else "disabled"
         await ctx.send(f"{ctx.author.mention} Loop {status}")
+
 
     @commands.command(name="download")
     async def cmd_download(self, ctx):
@@ -43,11 +88,12 @@ class MusicCog(commands.Cog):
         await ctx.send(f"{ctx.message.author.mention} Successfully downloaded track `{name}`.")
         logging.info(name)
 
+
     @commands.command(name="hardreset")
     async def cmd_hardreset(self, ctx):
         await ctx.send(f"{ctx.message.author.mention} Attempting to hard reset library...")
-        library_files = glob.glob('library/*')
-        metadata_files = glob.glob('metadata/*')
+        library_files = glob.glob('library/audio/*.m4a')
+        metadata_files = glob.glob('library/metadata/*.json')
         all_files = library_files + metadata_files
         for file_path in all_files:
             try:
@@ -57,37 +103,9 @@ class MusicCog(commands.Cog):
         await ctx.send(f"{ctx.message.author.mention} Hard reset complete")
 
 
-    def download_m4a(self, url):
-        ydl_opts = {
-            'format': 'm4a/bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'm4a',
-            }],
-            "outtmpl": 'library/%(id)s',
-            'noplaylist': True, # disables getting playlist
-            'progress_hooks': [self.hook], # adds the progress hook
-            'print_to_file': {
-                'video': [
-                    # defines the json output format and destination
-                    ('%(.{id,display_id,title,channel,upload_date,duration_string})#j',
-                    'metadata/%(id)s.json')
-                ]
-            }
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            ydl.process_info(info) # triggers download
-            return ydl.prepare_filename(info)
-
-        logging.error("File download failed")
-        raise RuntimeError("A file download failed")
-
-
     @commands.command(name="stop")
     async def cmd_stop(self, ctx):
-        voice = discord.utils.get(self.voice_clients, guild=ctx.guild)
+        voice = ctx.voice_client
         if voice and voice.is_connected():
             await voice.disconnect()
             await ctx.send(f"{ctx.message.author.mention} Left the channel.")
@@ -114,7 +132,7 @@ class MusicCog(commands.Cog):
             voice = await channel.connect()
 
         track_name = ' '.join(args)
-        track_file = f"library/{track_name}.m4a"
+        track_file = f"library/audio/{track_name}.m4a"
         # keep looping until someone flips the flag off
         while True:
             source = discord.FFmpegPCMAudio(track_file)
@@ -128,6 +146,7 @@ class MusicCog(commands.Cog):
 
         # disconnect after the player has finished
         await ctx.voice_client.disconnect()
+
 
 async def setup(bot):
     await bot.add_cog(MusicCog(bot))
