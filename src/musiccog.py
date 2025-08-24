@@ -26,7 +26,7 @@ class MusicCog(commands.Cog):
             "upload_date",
             "duration_string"
         ]
-        self.library = self.load_library()
+        self.load_library()
         logging.info(self.library)
         self.max_column_width = 30
 
@@ -54,7 +54,7 @@ class MusicCog(commands.Cog):
                 metadata.append(file_data_list)
 
         df = pd.DataFrame(metadata, columns=self.metadata_columns)
-        return df
+        self.library = df
 
 
     def hook(self, d):
@@ -77,7 +77,7 @@ class MusicCog(commands.Cog):
             'print_to_file': { # enables json output for metadata
                 'video': [
                     # defines the json output format and destination
-                    (f'%(.{",".join(self.metadata_columns)})#j',
+                    ('%(.{id,title,channel,upload_date,duration_string})#j',
                     'library/metadata/%(id)s.json')
                 ]
             }
@@ -90,6 +90,17 @@ class MusicCog(commands.Cog):
 
         logging.error("File download failed")
         raise RuntimeError("A file download failed")
+
+
+    @commands.command(name="registerbreak")
+    async def cmd_registerbreak(self, ctx, *args):
+        with open("library/config/break.json", "r", encoding="utf-8") as read_handle:
+            break_dict = json.loads(read_handle)
+            break_dict[ctx.author] = args[0]
+        with open("library/config/break.json", "w", encoding="utf-8") as write_handle:
+            json.dump(break_dict, write_handle, ensure_ascii=False, indent=4)
+        await ctx.send(f"Registered {ctx.author.mention}'s break music as id {args[0]}")
+
 
     @commands.command(name="library")
     async def cmd_library(self, ctx):
@@ -114,6 +125,7 @@ class MusicCog(commands.Cog):
         )
         await ctx.send(msg)
 
+
     @commands.command(name="loop")
     async def cmd_loop(self, ctx):
         self.loop_enabled = not self.loop_enabled
@@ -132,8 +144,8 @@ class MusicCog(commands.Cog):
         except RuntimeError as e:
             await ctx.send("An internal error occurred while downloading the file. Please contact the developer.")
             raise RuntimeError(e) from e
-        await ctx.send(f"{ctx.message.author.mention} Successfully downloaded track `{name}`.")
-        logging.info(name)
+        self.load_library()
+        await ctx.send(f"{ctx.message.author.mention} Successfully downloaded track `{name}` and reloaded the library.")
 
 
     @commands.command(name="hardreset")
