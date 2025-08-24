@@ -3,6 +3,7 @@
 import logging
 import os
 import asyncio
+import glob
 
 # third-party imports
 import dotenv
@@ -27,6 +28,14 @@ BOT = commands.Bot(command_prefix='>', intents=INTENTS)
 # TODO find a better way to handle this
 LOOP = False
 
+
+def hook(d):
+    if d["status"] == "downloading":
+        logging.info("%s %s", d['filename'], d['_percent_str'])
+    elif d["status"] == "finished":
+        logging.info("%s %s", d['filename'], d['_percent_str'])
+
+
 # bot commands
 @BOT.command()
 async def ping(ctx):
@@ -39,14 +48,28 @@ async def download(ctx):
     logging.info(ctx.message.content)
     link = ctx.message.content.split()[1]
     logging.info(link)
-    name = download_m4a(link)
-    await ctx.send(f"Downloaded track `{name}`.")
+    await ctx.send(f"{ctx.message.author.mention} Attempting to download track at URL `{link}`.")
+    try:
+        name = download_m4a(link)
+    except RuntimeError as e:
+        await ctx.send("An internal error occurred while downloading the file. Please contact the developer.")
+        raise RuntimeError(e) from e
+    await ctx.send(f"{ctx.message.author.mention} Successfully downloaded track `{name}`.")
     logging.info(name)
 
+@BOT.command()
+async def resethard(ctx):
+    await ctx.send(f"{ctx.message.author.mention} Attempting to hard reset library...")
+    library_files = glob.glob('library/*')
+    metadata_files = glob.glob('metadata/*')
+    all_files = library_files + metadata_files
+    for file_path in all_files:
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            logging.error("Failed to delete %s. Reason: %s", file_path, e)
+    await ctx.send(f"{ctx.message.author.mention} Hard reset complete")
 
-def hook(d):
-    if d['status'] == 'downloading':
-        logging.info(d['filename'], d['_percent_str'])
 
 def download_m4a(url):
     ydl_opts = {
@@ -55,22 +78,25 @@ def download_m4a(url):
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'm4a',
         }],
-        "outtmpl": 'library/%(uploader)s_%(title)s.%(ext)s',
-        'writeinfojson': True, # writes out the info json as well
+        "outtmpl": 'library/%(id)s',
         'noplaylist': True, # disables getting playlist
-        'progress_hooks': [hook], # adds a progress hook
+        'progress_hooks': [hook], # adds the progress hook
+        'print_to_file': {
+            'video': [
+                # defines the json output format and destination
+                ('%(.{id,display_id,title,channel,upload_date,duration_string})#j',
+                'metadata/%(id)s.json')
+            ]
+        }
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        file_path = ydl.prepare_filename(info)
-        ydl.process_info(info)  # starts the download
+        info = ydl.extract_info(url, download=False)
+        ydl.process_info(info) # triggers download
+        return ydl.prepare_filename(info)
 
-    clean_path = clean_yt_title(file_path)
-    os.rename(file_path, clean_path)
-
-    return clean_path.split("/")[1].replace(".m4a", "")
-
+    logging.error("File download failed")
+    raise RuntimeError("A file download failed")
 
 @BOT.command()
 async def loop(ctx):
@@ -126,11 +152,6 @@ async def play(ctx, *args):
     # disconnect after the player has finished
     player.stop()
     await voice.disconnect()
-
-def clean_yt_title(title: str):
-    title = title.replace(" - Topic", "")
-
-    return title
 
 
 def start_bot():
