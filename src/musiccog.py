@@ -74,7 +74,8 @@ class MusicCog(commands.Cog):
             track_id = file_path.split("/")[2].split(".")[0]
             if not os.path.isfile(self.get_track_filepath(track_id)):
                 logging.error("Metadata file %s has no matching audio file", file_path)
-                raise FileNotFoundError(f"Expected to find a matching audio file for metadata file {file_path}")
+                raise FileNotFoundError(
+                    f"Expected to find a matching audio file for metadata file {file_path}")
 
             with open(file_path, 'r', encoding="utf-8") as file_handle:
                 logging.info("Opened file %s", file_path)
@@ -99,7 +100,7 @@ class MusicCog(commands.Cog):
         logging.info("Getting title for id %s", given_id)
         found = self.library.loc[self.library['id'] == given_id]["title"]
         if len(found) == 0:
-            raise ValueError("The requested ID was not found in the library")
+            raise ValueError(f"The requested ID {given_id} was not found in the library")
         found_title = found.iloc[0]
         logging.info("Found title for id %s: %s", given_id, found_title)
         return found_title
@@ -132,12 +133,13 @@ class MusicCog(commands.Cog):
         given_id = "".join(args[0])
         logging.info("Given break id: %s", given_id)
         if given_id not in self.library["id"].values:
-            await ctx.send(f"{ctx.author.mention} The ID `{given_id}` does not correspond to a known track.")
+            await ctx.send(
+                f"{ctx.author.mention} The ID `{given_id}` does not correspond to a known track.")
             return
         track_title = self.get_title_from_id(given_id)
         logging.info("Given track ID %s corresponds to track titled %s", given_id, track_title)
 
-        
+
         if os.path.exists(self.breakpath):
             logging.info("Break file record exists, opening")
             with open(self.breakpath, "r", encoding="utf-8") as read_handle:
@@ -208,14 +210,18 @@ class MusicCog(commands.Cog):
         logging.info(ctx.message.content)
         link = args[0]
         logging.info(link)
-        await ctx.send(f"{ctx.message.author.mention} Attempting to download track at URL `{link}`.")
+        await ctx.send(
+            f"{ctx.message.author.mention} Attempting to download track at URL `{link}`.")
         try:
             track_id = self.download_m4a(link)
         except RuntimeError as e:
-            await ctx.send("An internal error occurred while downloading the file. Please contact the developer.")
+            await ctx.send("An internal error occurred while downloading the file.")
             raise RuntimeError(e) from e
         self.load_library()
-        await ctx.send(f"{ctx.message.author.mention} Successfully downloaded track `{self.get_title_from_id(track_id)}` and reloaded the library.")
+        track_title = self.get_title_from_id(track_id)
+        await ctx.send(
+            f"{ctx.message.author.mention} Successfully downloaded track"
+            + f"`{track_title}` and reloaded the library.")
         logging.info("Downloaded track %s from URL %s", self.get_title_from_id(track_id), link)
 
     @commands.command(name="hardreset")
@@ -275,7 +281,7 @@ class MusicCog(commands.Cog):
         track_file = self.get_track_filepath(track_id)
         track_title = self.get_title_from_id(track_id)
         user_id = str(ctx.author.id)
-        self.saved_track[user_id] = track_file
+        self.saved_track[user_id] = track_id
         logging.info("Saved track ID for resume")
 
         # 3. Start playback
@@ -283,9 +289,9 @@ class MusicCog(commands.Cog):
         self._play_with_loop(voice, track_file)
 
         await ctx.send(f"Now playing `{track_title}`.")
-    
+
     def _play_with_loop(self, voice: discord.VoiceClient, track_file: str):
-        def _after_play(error):
+        def _after_play():
             if self.loop_enabled:
                 # replay the same file
                 logging.info("Loop enabled. Replaying track %s.", track_file)
@@ -313,7 +319,8 @@ class MusicCog(commands.Cog):
             break_dict = json.load(f)
         track_id = break_dict.get(user_id)
         if not track_id:
-            await ctx.send(f"{ctx.author.mention} Please register a break track to enable this command.")
+            await ctx.send(
+                f"{ctx.author.mention} Please register a break track to enable this command.")
             return
 
         logging.info("Getting voice client for target user channel")
@@ -326,12 +333,13 @@ class MusicCog(commands.Cog):
             self.break_mode[user_id] = False
             voice.stop()  # stops the looping break track
 
-            original_file = self.saved_track.get(user_id)
-            if original_file:
-                logging.info("Found original track %s", original_file)
-                source = discord.FFmpegPCMAudio(original_file)
+            original_file_id = self.saved_track.get(user_id)
+            if original_file_id:
+                logging.info("Found original track %s", original_file_id)
+                source = discord.FFmpegPCMAudio(self.get_track_filepath(original_file_id))
                 voice.play(source, after=lambda e: None)
-                await ctx.send(f"Resuming previous track `{self.get_title_from_id(original_file)}`")
+                await ctx.send(
+                    f"Resuming previous track `{self.get_title_from_id(original_file_id)}`")
             else:
                 await ctx.send("No original track to resume.")
         else:
@@ -340,7 +348,7 @@ class MusicCog(commands.Cog):
             if voice.is_playing():
                 logging.info("Pausing active track")
                 voice.pause()
-            
+
             logging.info("Enabling break mode for user %s", user_id)
             self.break_mode[user_id] = True
 
@@ -348,7 +356,7 @@ class MusicCog(commands.Cog):
             source = discord.FFmpegPCMAudio(break_file)
 
             # define a recursive after-callback to loop
-            def _loop_break(error):
+            def _loop_break():
                 if self.break_mode.get(user_id):
                     logging.info("Looping break music after finished playback")
                     voice.play(discord.FFmpegPCMAudio(break_file), after=_loop_break)
@@ -358,7 +366,7 @@ class MusicCog(commands.Cog):
 
 
 async def setup(bot):
+    """Required function for adding a cog to a bot config"""
     logging.info("Adding cog for music")
     await bot.add_cog(MusicCog(bot))
     logging.info("Music cog added")
-

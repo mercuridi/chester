@@ -19,11 +19,13 @@ LOGGING_DESTINATION = "logs/chester.log"
 
 
 class Chester(commands.Bot):
+    """Wrapper for commands.Bot"""
     def __init__(self, **kwargs: dict[str, Any]):
         super().__init__(**kwargs)
 
 
 async def main():
+    """Driver function to set up important config for Chester"""
     # set up logging
     filehandler = logging.FileHandler(LOGGING_DESTINATION, mode="w", encoding="utf8")
     streamhandler = logging.StreamHandler()
