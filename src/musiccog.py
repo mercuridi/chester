@@ -8,6 +8,7 @@ import asyncio
 import glob
 import json
 from typing import Any
+from collections import defaultdict
 
 # third-party imports
 import pandas as pd
@@ -21,7 +22,6 @@ class MusicCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         logging.info("Instantiating music cog")
         self.bot: commands.Bot = bot
-        self.loop_enabled: bool = False
         self.metadata_columns: list[str] = [
             "id",
             "title",
@@ -34,6 +34,7 @@ class MusicCog(commands.Cog):
         # TODO: should these dictionaries track the channel instead of the user?
         self.break_mode: dict[str, bool] = {} # dict tracking break mode for each channel
         self.saved_track: dict[str, str] = {} # dict tracking the saved track for each channel
+        self.loop_enabled: dict[str, bool] = defaultdict(bool) # dict tracking loop mode for each channel
         self.ydl_options: dict[str, Any] = {
             'format': 'm4a/bestaudio/best',
             'postprocessors': [{
@@ -129,7 +130,8 @@ class MusicCog(commands.Cog):
     async def check_args_ok(self, ctx: commands.Context, args: tuple):
         """Checks if the given arguments to a command are valid"""
         if len(args) == 0:
-            await ctx.send(f"{ctx.message.author.mention} Please provide an argument to the command")
+            await ctx.send(
+                f"{ctx.message.author.mention} Please provide an argument to the command")
             logging.error("No argument was provided to the command")
             return False
         return True
@@ -237,10 +239,13 @@ class MusicCog(commands.Cog):
     @commands.command(name="loop")
     async def cmd_loop(self, ctx: commands.Context) -> None:
         """Global loop toggle"""
-        logging.info("Toggling loop switch; current value %s", self.loop_enabled)
-        self.loop_enabled = not self.loop_enabled
-        status = "enabled" if self.loop_enabled else "disabled"
-        logging.info("Toggle value to %s", self.loop_enabled)
+        logging.info("Toggling loop switch")
+        channel: discord.VoiceChannel = await self.get_caller_channel(ctx)
+        if channel is None:
+            return
+        self.loop_enabled[channel.id] = not self.loop_enabled[channel.id]
+        status = "enabled" if self.loop_enabled[channel.id] else "disabled"
+        logging.info("Toggle value to %s", self.loop_enabled[channel.id])
         await ctx.send(f"{ctx.author.mention} Loop {status}")
 
     # download
@@ -253,16 +258,17 @@ class MusicCog(commands.Cog):
         link = "".join(args[0])
         logging.info(link)
         await ctx.send(
-            f"{ctx.message.author.mention} Attempting to download track at URL `{link}`.")
+            f" Attempting to download track at URL `{link}`.")
         try:
             track_id = self.download_m4a(link)
         except RuntimeError as e:
-            await ctx.send("An internal error occurred while downloading the file.")
+            await ctx.send(
+                f"{ctx.message.author.mention} An error occurred while downloading the file.")
             raise RuntimeError(e) from e
         self.load_library()
         track_title = self.get_title_from_id(track_id)
         await ctx.send(
-            f"{ctx.message.author.mention} Successfully downloaded track"
+            "Successfully downloaded track"
             + f"`{track_title}` and reloaded the library.")
         logging.info("Downloaded track %s from URL %s", self.get_title_from_id(track_id), link)
 
@@ -295,6 +301,11 @@ class MusicCog(commands.Cog):
             await voice.disconnect()
             await ctx.send(f"{ctx.message.author.mention} Left the channel.")
             logging.info("Disconnected from voice")
+            if self.break_mode.get(voice.channel.id):
+                self.break_mode.pop(voice.channel.id)
+                self.saved_track.pop(voice.channel.id)
+                logging.info("Cleaned up active break after stop")
+            self.loop_enabled[voice.channel.id] = False
         else:
             await ctx.send(f"{ctx.message.author.mention} There is no active track.")
             logging.info("There is no channel to disconnect from.")
@@ -309,7 +320,7 @@ class MusicCog(commands.Cog):
 
         # 1. Join or move to the user's voice channel
         logging.info("Playing track")
-        voice = await self.join_caller_channel(ctx)
+        voice: discord.VoiceProtocol = await self.join_caller_channel(ctx)
         if voice is None:
             logging.error("Caller was not in a voice channel when break command was called")
             return
@@ -320,7 +331,7 @@ class MusicCog(commands.Cog):
         self.saved_track[voice.channel.id] = track_id
 
         def _after_play(_):
-            if self.loop_enabled:
+            if self.loop_enabled[voice.channel.id]:
                 voice.play(discord.FFmpegPCMAudio(track_file), after=_after_play)
             else:
                 coro = voice.disconnect()
@@ -366,6 +377,8 @@ class MusicCog(commands.Cog):
             voice.stop()
 
             original_file_id = self.saved_track.get(voice.channel.id)
+            if voice.channel.id in self.saved_track:
+                self.saved_track.pop(voice.channel.id)
             if original_file_id:
                 logging.info("Found original track %s", original_file_id)
                 source = discord.FFmpegPCMAudio(self.get_track_filepath(original_file_id))
@@ -373,7 +386,8 @@ class MusicCog(commands.Cog):
                 await ctx.send(
                     f"Resuming previous track `{self.get_title_from_id(original_file_id)}`")
             else:
-                await ctx.send("No original track to resume.")        
+                await ctx.send(
+                    f"{ctx.message.author.mention} Ending break with no original track to resume.")
         else:
             # → turn ON
             self.break_mode[voice.channel.id] = True
