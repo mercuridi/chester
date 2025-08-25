@@ -250,7 +250,7 @@ class MusicCog(commands.Cog):
         if not await self.check_args_ok(ctx, args):
             return
         logging.info(ctx.message.content)
-        link = args[0]
+        link = "".join(args[0])
         logging.info(link)
         await ctx.send(
             f"{ctx.message.author.mention} Attempting to download track at URL `{link}`.")
