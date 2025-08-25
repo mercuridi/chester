@@ -9,6 +9,7 @@ import glob
 import json
 from typing import Any
 from collections import defaultdict
+from math import floor
 
 # third-party imports
 import pandas as pd
@@ -16,6 +17,24 @@ import yt_dlp
 import discord
 from discord.ext import commands
 from tabulate import tabulate
+
+class AudioSourceTracked(discord.AudioSource):
+    """Class stolen from https://www.reddit.com/r/Discord_Bots/comments/q9jl5b/how_to_make_discordpy_bot_display_current_song/"""
+    def __init__(self, source: discord.AudioSource, already_elapsed: int = 0):
+        self._source = source
+        self.count_20ms = 0
+        self.already_elapsed = already_elapsed
+
+    def read(self) -> bytes:
+        data = self._source.read()
+        if data:
+            self.count_20ms += 1
+        return data
+
+    @property
+    def progress(self) -> int:
+        """Returns the progress of the tracked audio source in seconds"""
+        return self.already_elapsed + floor(self.count_20ms * 0.02) # count_20ms * 20ms
 
 class MusicCog(commands.Cog):
     """Class to handle all audio/music functionality in Chester"""
@@ -34,7 +53,7 @@ class MusicCog(commands.Cog):
         # dict tracking break mode for each channel
         self.break_mode: dict[str, bool] = {}
         # dict tracking the saved track for each channel
-        self.saved_track: dict[str, str] = {}
+        self.saved_track: dict[str, dict[str, str]] = {}
         # dict tracking loop mode for each channel
         self.loop_enabled: dict[str, bool] = defaultdict(bool)
         # dict tracking events per channel for play-overwrite behaviour
@@ -335,19 +354,19 @@ class MusicCog(commands.Cog):
         # 2. Build track path & stash for resume
         track_id   = "".join(list(args[0]))
         track_file = self.get_track_filepath(track_id)
-        self.saved_track[voice.channel.id] = track_id
+        self.saved_track[voice.channel.id] = {"track_id": track_id}
 
         def _after_play(_):
             logging.info("Checking loop flag for channel %s", voice.channel.id)
             if self.loop_enabled[voice.channel.id]:
                 logging.info("Loop flag is set True, replaying track")
-                voice.play(discord.FFmpegPCMAudio(track_file), after=_after_play)
+                voice.play(AudioSourceTracked(discord.FFmpegPCMAudio(track_file)), after=_after_play)
             else:
                 logging.info("Loop flag is set False, explicitly stopping voice playback")
                 voice.stop()
 
         # start playback
-        source = discord.FFmpegPCMAudio(track_file)
+        source = AudioSourceTracked(discord.FFmpegPCMAudio(track_file))
         voice.play(source, after=_after_play)
         await ctx.send(f"Now playing `{self.get_title_from_id(track_id)}`")
 
@@ -378,7 +397,7 @@ class MusicCog(commands.Cog):
         def _loop_break(_):
             if self.break_mode.get(voice.channel.id):
                 logging.info("Track has ended but break still enabled, looping break track")
-                voice.play(discord.FFmpegPCMAudio(break_file), after=_loop_break)
+                voice.play(AudioSourceTracked(discord.FFmpegPCMAudio(break_file)), after=_loop_break)
 
         # toggle on/off logic
         if self.break_mode.get(voice.channel.id):
@@ -386,25 +405,37 @@ class MusicCog(commands.Cog):
             self.break_mode[voice.channel.id] = False
             voice.stop()
 
-            original_file_id = self.saved_track.get(voice.channel.id)
-            if voice.channel.id in self.saved_track:
-                self.saved_track.pop(voice.channel.id)
-            if original_file_id:
-                logging.info("Found original track %s", original_file_id)
-                source = discord.FFmpegPCMAudio(self.get_track_filepath(original_file_id))
+            original_track_info = self.saved_track.get(voice.channel.id)
+            if original_track_info:
+                logging.info("Found original track info: \n%s", original_track_info)
+                track_id = original_track_info["track_id"]
+                track_title = self.get_title_from_id(track_id)
+                time_elapsed = original_track_info["timestamp"]
+
+                source = AudioSourceTracked(
+                    source = discord.FFmpegPCMAudio(
+                        source  = self.get_track_filepath(track_id),
+                        options = f"-ss {time_elapsed}"
+                    ),
+                    already_elapsed = time_elapsed
+                )
                 voice.play(source, after=lambda e: None)
                 await ctx.send(
-                    f"Resuming previous track `{self.get_title_from_id(original_file_id)}`")
+                    f"Resuming previous track `{track_title}` from {time_elapsed} seconds elapsed")
             else:
                 await ctx.send(
                     f"{ctx.message.author.mention} Ending break with no original track to resume.")
         else:
             # → turn ON
+            logging.info("Enabling break mode")
             self.break_mode[voice.channel.id] = True
             if voice.is_playing():
+                logging.info("Break mode enabled when track playing; writing out timestamp")
                 voice.pause()
+                self.saved_track.get(voice.channel.id)["timestamp"] = voice.source.progress
+                logging.info("Wrote out timestamp %s", self.saved_track.get(voice.channel.id)["timestamp"])
 
-            voice.play(discord.FFmpegPCMAudio(break_file), after=_loop_break)
+            voice.play(AudioSourceTracked(discord.FFmpegPCMAudio(break_file)), after=_loop_break)
             await ctx.send(f"Playing break music `{self.get_title_from_id(track_id)}`")
 
 
