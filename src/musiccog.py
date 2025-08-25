@@ -31,10 +31,14 @@ class MusicCog(commands.Cog):
         ]
         self.load_library()        # load the library of downloaded songs
         self.max_column_width = 30 # set the max column width for library printing
-        # TODO: should these dictionaries track the channel instead of the user?
-        self.break_mode: dict[str, bool] = {} # dict tracking break mode for each channel
-        self.saved_track: dict[str, str] = {} # dict tracking the saved track for each channel
-        self.loop_enabled: dict[str, bool] = defaultdict(bool) # dict tracking loop mode for each channel
+        # dict tracking break mode for each channel
+        self.break_mode: dict[str, bool] = {}
+        # dict tracking the saved track for each channel
+        self.saved_track: dict[str, str] = {}
+        # dict tracking loop mode for each channel
+        self.loop_enabled: dict[str, bool] = defaultdict(bool)
+        # dict tracking events per channel for play-overwrite behaviour
+        self.play_block_event: dict[str, asyncio.Event] = defaultdict(asyncio.Event)
         self.ydl_options: dict[str, Any] = {
             'format': 'm4a/bestaudio/best',
             'postprocessors': [{
@@ -324,6 +328,9 @@ class MusicCog(commands.Cog):
         if voice is None:
             logging.error("Caller was not in a voice channel when break command was called")
             return
+        if voice.is_playing():
+            logging.info("Track is already playing; stopping playback to be replaced")
+            voice.pause()
 
         # 2. Build track path & stash for resume
         track_id   = "".join(list(args[0]))
