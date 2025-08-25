@@ -331,11 +331,13 @@ class MusicCog(commands.Cog):
         self.saved_track[voice.channel.id] = track_id
 
         def _after_play(_):
+            logging.info("Checking loop flag for channel %s", voice.channel.id)
             if self.loop_enabled[voice.channel.id]:
+                logging.info("Loop flag is set True, replaying track")
                 voice.play(discord.FFmpegPCMAudio(track_file), after=_after_play)
             else:
-                coro = voice.disconnect()
-                asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
+                logging.info("Loop flag is set False, explicitly stopping voice playback")
+                voice.stop()
 
         # start playback
         source = discord.FFmpegPCMAudio(track_file)
@@ -368,6 +370,7 @@ class MusicCog(commands.Cog):
 
         def _loop_break(_):
             if self.break_mode.get(voice.channel.id):
+                logging.info("Track has ended but break still enabled, looping break track")
                 voice.play(discord.FFmpegPCMAudio(break_file), after=_loop_break)
 
         # toggle on/off logic
