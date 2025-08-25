@@ -106,7 +106,7 @@ class MusicCog(commands.Cog):
         return found_title
 
 
-    def download_m4a(self, url: str):
+    def download_m4a(self, url: str) -> str:
         """Downloads the m4a track for a given youtube URL"""
         logging.info("Downloading m4a track for URL %s", url)
         with yt_dlp.YoutubeDL(self.ydl_options) as ydl:
@@ -127,9 +127,11 @@ class MusicCog(commands.Cog):
 
 
     @commands.command(name="registerbreak")
-    async def cmd_registerbreak(self, ctx: commands.Context, *args: tuple):
+    async def cmd_registerbreak(self, ctx: commands.Context, *args: tuple) -> None:
         """Command to register a break track per user"""
         logging.info("Registering break track")
+        if not await self.check_args_ok(ctx, args):
+            return
         given_id = "".join(args[0])
         logging.info("Given break id: %s", given_id)
         if given_id not in self.library["id"].values:
@@ -168,7 +170,7 @@ class MusicCog(commands.Cog):
         logging.info("Added track to break record")
 
     @commands.command(name="library")
-    async def cmd_library(self, ctx: commands.Context):
+    async def cmd_library(self, ctx: commands.Context) -> None:
         """Command to display the available library"""
         logging.info("Displaying available tracks in library")
         library_display = self.library.copy()
@@ -195,7 +197,7 @@ class MusicCog(commands.Cog):
 
 
     @commands.command(name="loop")
-    async def cmd_loop(self, ctx: commands.Context):
+    async def cmd_loop(self, ctx: commands.Context) -> None:
         """Global loop toggle"""
         logging.info("Toggling loop switch; current value %s", self.loop_enabled)
         self.loop_enabled = not self.loop_enabled
@@ -205,8 +207,10 @@ class MusicCog(commands.Cog):
 
 
     @commands.command(name="download")
-    async def cmd_download(self, ctx: commands.Context, *args):
+    async def cmd_download(self, ctx: commands.Context, *args: tuple) -> None:
         """Downloads a track given a URL in the argument"""
+        if not await self.check_args_ok(ctx, args):
+            return
         logging.info(ctx.message.content)
         link = args[0]
         logging.info(link)
@@ -225,7 +229,7 @@ class MusicCog(commands.Cog):
         logging.info("Downloaded track %s from URL %s", self.get_title_from_id(track_id), link)
 
     @commands.command(name="hardreset")
-    async def cmd_hardreset(self, ctx: commands.Context):
+    async def cmd_hardreset(self, ctx: commands.Context) -> None:
         """Command to reset all data files"""
         logging.info("Performing hard reset on database")
         await ctx.send(f"{ctx.message.author.mention} Attempting to hard reset library...")
@@ -244,7 +248,7 @@ class MusicCog(commands.Cog):
 
 
     @commands.command(name="stop")
-    async def cmd_stop(self, ctx: commands.Context):
+    async def cmd_stop(self, ctx: commands.Context) -> None:
         """Stops active playback"""
         logging.info("Stopping playback")
         voice = ctx.voice_client
@@ -259,14 +263,49 @@ class MusicCog(commands.Cog):
 
 
     @commands.command(name="play")
-    async def cmd_play(self, ctx: commands.Context, *args):
+    async def cmd_play(self, ctx: commands.Context, *args: tuple) -> None:
         """Plays a track given an ID"""
+        if not await self.check_args_ok(ctx, args):
+            return
+
         # 1. Join or move to the user's voice channel
         logging.info("Playing track")
+        voice = await self.join_caller_channel(ctx)
+
+        # 2. Build track path & stash for resume
+        track_id   = "".join(list(args[0]))
+        track_file = self.get_track_filepath(track_id)
+        user_id    = str(ctx.author.id)
+        self.saved_track[user_id] = track_id
+
+        def _after_play(_):
+            if self.loop_enabled:
+                voice.play(discord.FFmpegPCMAudio(track_file), after=_after_play)
+            else:
+                coro = voice.disconnect()
+                asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
+
+        # start playback
+        source = discord.FFmpegPCMAudio(track_file)
+        voice.play(source, after=_after_play)
+        await ctx.send(f"Now playing `{self.get_title_from_id(track_id)}`")
+
+    async def check_args_ok(self, ctx: commands.Context, args: tuple):
+        """Checks if the given arguments to a command are valid"""
+        if len(args) == 0:
+            await ctx.send(f"{ctx.message.author.mention} Please provide an argument to the command")
+            logging.error("No argument was provided to the command")
+            return False
+        return True
+
+    async def join_caller_channel(self, ctx: commands.Context) -> discord.VoiceProtocol | None:
+        """Joins the calling user's voice channel, if it exists"""
+        logging.info("Joining the calling user's channel")
         try:
             channel = ctx.author.voice.channel
         except AttributeError:
-            return await ctx.send(f"{ctx.author.mention} You are not in a voice channel.")
+            await ctx.send(f"{ctx.author.mention} You are not in a voice channel.")
+            return None
         logging.info("Target user channel found")
 
         voice = ctx.voice_client
@@ -275,37 +314,7 @@ class MusicCog(commands.Cog):
         else:
             voice = await channel.connect()
         logging.info("Joined target user voice channel")
-
-        # 2. Build track path & stash for resume
-        track_id = args[0]
-        track_file = self.get_track_filepath(track_id)
-        track_title = self.get_title_from_id(track_id)
-        user_id = str(ctx.author.id)
-        self.saved_track[user_id] = track_id
-        logging.info("Saved track ID for resume")
-
-        # 3. Start playback
-        logging.info("Playing the track %s", track_title)
-        self._play_with_loop(voice, track_file)
-
-        await ctx.send(f"Now playing `{track_title}`.")
-
-    def _play_with_loop(self, voice: discord.VoiceClient, track_file: str):
-        def _after_play():
-            if self.loop_enabled:
-                # replay the same file
-                logging.info("Loop enabled. Replaying track %s.", track_file)
-                voice.play(discord.FFmpegPCMAudio(track_file), after=_after_play)
-            else:
-                # schedule a disconnect on the bot's loop when loop is turned off
-                # TODO not intended behaviour
-                logging.info("Loop disabled, ending playback of current track")
-                coro = voice.disconnect()
-                asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
-
-        # start playback
-        source = discord.FFmpegPCMAudio(track_file)
-        voice.play(source, after=_after_play)
+        return voice
 
     @commands.command(name="break")
     async def cmd_break(self, ctx: commands.Context):
@@ -322,16 +331,23 @@ class MusicCog(commands.Cog):
             await ctx.send(
                 f"{ctx.author.mention} Please register a break track to enable this command.")
             return
+        break_file = self.get_track_filepath(track_id)
 
         logging.info("Getting voice client for target user channel")
-        voice = ctx.voice_client or await ctx.author.voice.channel.connect()
+        voice = await self.join_caller_channel(ctx)
+        if voice is None:
+            logging.error("Caller was not in a voice channel when break command was called")
+            return
 
-        # 2. toggle
+        def _loop_break(_):
+            if self.break_mode.get(user_id):
+                voice.play(discord.FFmpegPCMAudio(break_file), after=_loop_break)
+
+        # toggle on/off logic
         if self.break_mode.get(user_id):
-            # → turn OFF break mode
-            logging.info("Disabling break mode for user %s", user_id)
+            # → turn OFF
             self.break_mode[user_id] = False
-            voice.stop()  # stops the looping break track
+            voice.stop()
 
             original_file_id = self.saved_track.get(user_id)
             if original_file_id:
@@ -341,31 +357,18 @@ class MusicCog(commands.Cog):
                 await ctx.send(
                     f"Resuming previous track `{self.get_title_from_id(original_file_id)}`")
             else:
-                await ctx.send("No original track to resume.")
+                await ctx.send("No original track to resume.")        
         else:
-            # → turn ON break mode
-            # pause or stop whatever's playing
+            # → turn ON
+            self.break_mode[user_id] = True
             if voice.is_playing():
-                logging.info("Pausing active track")
                 voice.pause()
 
-            logging.info("Enabling break mode for user %s", user_id)
-            self.break_mode[user_id] = True
-
-            break_file = self.get_track_filepath(track_id)
-            source = discord.FFmpegPCMAudio(break_file)
-
-            # define a recursive after-callback to loop
-            def _loop_break():
-                if self.break_mode.get(user_id):
-                    logging.info("Looping break music after finished playback")
-                    voice.play(discord.FFmpegPCMAudio(break_file), after=_loop_break)
-
-            voice.play(source, after=_loop_break)
-            await ctx.send(f"Playing pre-set break music: `{self.get_title_from_id(track_id)}`")
+            voice.play(discord.FFmpegPCMAudio(break_file), after=_loop_break)
+            await ctx.send(f"Playing break music `{self.get_title_from_id(track_id)}`")
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot) -> None:
     """Required function for adding a cog to a bot config"""
     logging.info("Adding cog for music")
     await bot.add_cog(MusicCog(bot))
