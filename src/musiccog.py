@@ -32,8 +32,8 @@ class MusicCog(commands.Cog):
         self.load_library()        # load the library of downloaded songs
         self.max_column_width = 30 # set the max column width for library printing
         # TODO: should these dictionaries track the channel instead of the user?
-        self.break_mode: dict[str, bool] = {} # dict tracking break mode for each user
-        self.saved_track: dict[str, str] = {} # dict tracking the saved track for each user
+        self.break_mode: dict[str, bool] = {} # dict tracking break mode for each channel
+        self.saved_track: dict[str, str] = {} # dict tracking the saved track for each channel
         self.ydl_options: dict[str, Any] = {
             'format': 'm4a/bestaudio/best',
             'postprocessors': [{
@@ -126,6 +126,43 @@ class MusicCog(commands.Cog):
         return f"library/audio/{track_id}.m4a"
 
 
+    async def check_args_ok(self, ctx: commands.Context, args: tuple):
+        """Checks if the given arguments to a command are valid"""
+        if len(args) == 0:
+            await ctx.send(f"{ctx.message.author.mention} Please provide an argument to the command")
+            logging.error("No argument was provided to the command")
+            return False
+        return True
+
+    async def join_caller_channel(self, ctx: commands.Context) -> discord.VoiceProtocol | None:
+        """Joins the calling user's voice channel, if it exists"""
+        logging.info("Joining the calling user's channel")
+        channel = await self.get_caller_channel(ctx)
+        if channel is None:
+            return None
+
+        voice = ctx.voice_client
+        if voice and voice.is_connected():
+            await voice.move_to(channel)
+        else:
+            voice = await channel.connect()
+        logging.info("Joined target user voice channel")
+        return voice
+
+    async def get_caller_channel(self, ctx: commands.Context) -> discord.VoiceChannel | None:
+        """Gets the caller's voice channel object"""
+        logging.info("Getting the calling user's channel")
+        try:
+            channel = ctx.author.voice.channel
+            logging.info("Target user channel found")
+            return channel
+        except AttributeError:
+            await ctx.send(f"{ctx.author.mention} You are not in a voice channel.")
+            logging.info("The caller is not in a voice channel")
+            return None
+
+
+    # registerbreak
     @commands.command(name="registerbreak")
     async def cmd_registerbreak(self, ctx: commands.Context, *args: tuple) -> None:
         """Command to register a break track per user"""
@@ -169,6 +206,7 @@ class MusicCog(commands.Cog):
         await ctx.send(f"Registered {ctx.author.mention}'s break music as `{track_title}`")
         logging.info("Added track to break record")
 
+    # library
     @commands.command(name="library")
     async def cmd_library(self, ctx: commands.Context) -> None:
         """Command to display the available library"""
@@ -195,7 +233,7 @@ class MusicCog(commands.Cog):
         await ctx.send(msg)
         logging.info("Sent message for library display")
 
-
+    # loop
     @commands.command(name="loop")
     async def cmd_loop(self, ctx: commands.Context) -> None:
         """Global loop toggle"""
@@ -205,7 +243,7 @@ class MusicCog(commands.Cog):
         logging.info("Toggle value to %s", self.loop_enabled)
         await ctx.send(f"{ctx.author.mention} Loop {status}")
 
-
+    # download
     @commands.command(name="download")
     async def cmd_download(self, ctx: commands.Context, *args: tuple) -> None:
         """Downloads a track given a URL in the argument"""
@@ -228,6 +266,7 @@ class MusicCog(commands.Cog):
             + f"`{track_title}` and reloaded the library.")
         logging.info("Downloaded track %s from URL %s", self.get_title_from_id(track_id), link)
 
+    # hardreset
     @commands.command(name="hardreset")
     async def cmd_hardreset(self, ctx: commands.Context) -> None:
         """Command to reset all data files"""
@@ -246,7 +285,7 @@ class MusicCog(commands.Cog):
         await ctx.send(f"{ctx.message.author.mention} Hard reset complete")
         logging.info("Hard reset complete")
 
-
+    # stop
     @commands.command(name="stop")
     async def cmd_stop(self, ctx: commands.Context) -> None:
         """Stops active playback"""
@@ -261,7 +300,7 @@ class MusicCog(commands.Cog):
             logging.info("There is no channel to disconnect from.")
         logging.info("Stopped playback")
 
-
+    # play
     @commands.command(name="play")
     async def cmd_play(self, ctx: commands.Context, *args: tuple) -> None:
         """Plays a track given an ID"""
@@ -271,12 +310,14 @@ class MusicCog(commands.Cog):
         # 1. Join or move to the user's voice channel
         logging.info("Playing track")
         voice = await self.join_caller_channel(ctx)
+        if voice is None:
+            logging.error("Caller was not in a voice channel when break command was called")
+            return
 
         # 2. Build track path & stash for resume
         track_id   = "".join(list(args[0]))
         track_file = self.get_track_filepath(track_id)
-        user_id    = str(ctx.author.id)
-        self.saved_track[user_id] = track_id
+        self.saved_track[voice.channel.id] = track_id
 
         def _after_play(_):
             if self.loop_enabled:
@@ -290,32 +331,7 @@ class MusicCog(commands.Cog):
         voice.play(source, after=_after_play)
         await ctx.send(f"Now playing `{self.get_title_from_id(track_id)}`")
 
-    async def check_args_ok(self, ctx: commands.Context, args: tuple):
-        """Checks if the given arguments to a command are valid"""
-        if len(args) == 0:
-            await ctx.send(f"{ctx.message.author.mention} Please provide an argument to the command")
-            logging.error("No argument was provided to the command")
-            return False
-        return True
-
-    async def join_caller_channel(self, ctx: commands.Context) -> discord.VoiceProtocol | None:
-        """Joins the calling user's voice channel, if it exists"""
-        logging.info("Joining the calling user's channel")
-        try:
-            channel = ctx.author.voice.channel
-        except AttributeError:
-            await ctx.send(f"{ctx.author.mention} You are not in a voice channel.")
-            return None
-        logging.info("Target user channel found")
-
-        voice = ctx.voice_client
-        if voice and voice.is_connected():
-            await voice.move_to(channel)
-        else:
-            voice = await channel.connect()
-        logging.info("Joined target user voice channel")
-        return voice
-
+    # break
     @commands.command(name="break")
     async def cmd_break(self, ctx: commands.Context):
         """Command to quickly switch to registered break music"""
@@ -340,16 +356,16 @@ class MusicCog(commands.Cog):
             return
 
         def _loop_break(_):
-            if self.break_mode.get(user_id):
+            if self.break_mode.get(voice.channel.id):
                 voice.play(discord.FFmpegPCMAudio(break_file), after=_loop_break)
 
         # toggle on/off logic
-        if self.break_mode.get(user_id):
+        if self.break_mode.get(voice.channel.id):
             # → turn OFF
-            self.break_mode[user_id] = False
+            self.break_mode[voice.channel.id] = False
             voice.stop()
 
-            original_file_id = self.saved_track.get(user_id)
+            original_file_id = self.saved_track.get(voice.channel.id)
             if original_file_id:
                 logging.info("Found original track %s", original_file_id)
                 source = discord.FFmpegPCMAudio(self.get_track_filepath(original_file_id))
@@ -360,7 +376,7 @@ class MusicCog(commands.Cog):
                 await ctx.send("No original track to resume.")        
         else:
             # → turn ON
-            self.break_mode[user_id] = True
+            self.break_mode[voice.channel.id] = True
             if voice.is_playing():
                 voice.pause()
 
