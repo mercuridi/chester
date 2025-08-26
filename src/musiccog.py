@@ -75,6 +75,7 @@ class MusicCog(commands.Cog):
             }
         }
         self.breakpath = "library/config/break.json"
+        self.storytime_id = "T2a8i8BKV60"
         logging.info("Finished instantiation of music cog")
 
 
@@ -345,11 +346,16 @@ class MusicCog(commands.Cog):
         logging.info("Playing track")
         voice: discord.VoiceProtocol = await self.join_caller_channel(ctx)
         if voice is None:
-            logging.error("Caller was not in a voice channel when break command was called")
+            logging.error("Caller was not in a voice channel when play command was called")
             return
         if voice.is_playing():
             logging.info("Track is already playing; stopping playback to be replaced")
             voice.pause()
+        if self.break_mode.get(voice.channel.id):
+            self.break_mode[voice.channel.id] = False
+        if self.saved_track.get(voice.channel.id):
+            self.saved_track.pop(voice.channel.id)
+
 
         # 2. Build track path & stash for resume
         track_id   = "".join(list(args[0]))
@@ -372,21 +378,28 @@ class MusicCog(commands.Cog):
 
     # break
     @commands.command(name="break")
-    async def cmd_break(self, ctx: commands.Context):
+    async def cmd_break(self, ctx: commands.Context, mode: str = "break"):
         """Command to quickly switch to registered break music"""
         user_id = str(ctx.author.id)
-        logging.info("Switching to break music for user %s", ctx.author.display_name)
+        logging.info(f"Switching to {mode} music for user %s", ctx.author.display_name)
 
         # 1. load break.json
         logging.info("Loading break configuration file")
-        with open("library/config/break.json", "r", encoding="utf-8") as f:
-            break_dict = json.load(f)
-        track_id = break_dict.get(user_id)
-        if not track_id:
-            await ctx.send(
-                f"{ctx.author.mention} Please register a break track to enable this command.")
-            return
-        break_file = self.get_track_filepath(track_id)
+        if mode == "break":
+            with open("library/config/break.json", "r", encoding="utf-8") as f:
+                break_dict = json.load(f)
+            track_id = break_dict.get(user_id)
+            if not track_id:
+                await ctx.send(
+                    f"{ctx.author.mention} Please register a break track to enable this command.")
+                return
+            break_file = self.get_track_filepath(track_id)
+        elif mode == "storytime":
+            track_id = self.storytime_id
+            break_file = self.get_track_filepath(self.storytime_id)
+        else:
+            raise ValueError("Bad mode argument given to break")
+            break_file = None
 
         logging.info("Getting voice client for target user channel")
         voice = await self.join_caller_channel(ctx)
@@ -396,7 +409,7 @@ class MusicCog(commands.Cog):
 
         def _loop_break(_):
             if self.break_mode.get(voice.channel.id):
-                logging.info("Track has ended but break still enabled, looping break track")
+                logging.info("Track has ended but %s still enabled, looping %s track", mode, mode)
                 voice.play(AudioSourceTracked(discord.FFmpegPCMAudio(break_file)), after=_loop_break)
 
         # toggle on/off logic
@@ -408,6 +421,7 @@ class MusicCog(commands.Cog):
             original_track_info = self.saved_track.get(voice.channel.id)
             if original_track_info:
                 logging.info("Found original track info: \n%s", original_track_info)
+                self.saved_track.pop(voice.channel.id)
                 track_id = original_track_info["track_id"]
                 track_title = self.get_title_from_id(track_id)
                 time_elapsed = original_track_info["timestamp"]
@@ -424,19 +438,46 @@ class MusicCog(commands.Cog):
                     f"Resuming previous track `{track_title}` from {time_elapsed} seconds elapsed")
             else:
                 await ctx.send(
-                    f"{ctx.message.author.mention} Ending break with no original track to resume.")
+                    f"{ctx.message.author.mention} Ending {mode} with no original track to resume.")
         else:
             # → turn ON
-            logging.info("Enabling break mode")
+            logging.info("Enabling %s mode", mode)
             self.break_mode[voice.channel.id] = True
             if voice.is_playing():
-                logging.info("Break mode enabled when track playing; writing out timestamp")
+                logging.info("%s mode enabled when track playing; writing out timestamp", mode)
                 voice.pause()
                 self.saved_track.get(voice.channel.id)["timestamp"] = voice.source.progress
                 logging.info("Wrote out timestamp %s", self.saved_track.get(voice.channel.id)["timestamp"])
 
             voice.play(AudioSourceTracked(discord.FFmpegPCMAudio(break_file)), after=_loop_break)
-            await ctx.send(f"Playing break music `{self.get_title_from_id(track_id)}`")
+            await ctx.send(f"{ctx.message.author.mention} Playing {mode} music `{self.get_title_from_id(track_id)}`")
+
+
+    @commands.command(name="storytime")
+    async def cmd_storytime(self, ctx: commands.Context):
+        """Enables and disables storytime"""
+        await self.cmd_break(ctx, "storytime")
+
+
+    @commands.command(name="pause")
+    async def cmd_pause(self, ctx: commands.Context):
+        """Pause command; also resumes when already paused"""
+        logging.info("Playing track")
+        voice: discord.VoiceProtocol = await self.join_caller_channel(ctx)
+        if voice is None:
+            logging.error("Caller was not in a voice channel when pause command was called")
+            return
+        if not voice.source:
+            logging.info("Pause requested when there is no active source")
+            await ctx.send(f"{ctx.message.author.mention} There is no active track to pause or resume")
+        elif voice.is_playing():
+            logging.info("Pausing currently playing track")
+            voice.pause()
+            await ctx.send(f"{ctx.message.author.mention} Paused currently playing track")
+        else:
+            logging.info("Resuming paused track")
+            voice.resume()
+            await ctx.send(f"{ctx.message.author.mention} Resumed paused track")
 
 
 async def setup(bot: commands.Bot) -> None:
