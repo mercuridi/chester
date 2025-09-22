@@ -41,7 +41,7 @@ async def main():
     logging.info("registered commands: %s", [c.name for c in bot.commands])
 
     # start the bot
-    token = os.environ["DISCORD_BOT_TOKEN"]
+    token = os.environ["DISCORD_TOKEN"]
     await bot.start(token)
 
 if __name__ == "__main__":
