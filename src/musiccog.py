@@ -18,7 +18,7 @@ import discord
 from discord.ext import commands
 from tabulate import tabulate
 
-class AudioSourceTracked(discord.AudioSource):
+class TrackedAudioSource(discord.AudioSource):
     """Class stolen from https://www.reddit.com/r/Discord_Bots/comments/q9jl5b/how_to_make_discordpy_bot_display_current_song/"""
     def __init__(self, source: discord.AudioSource, already_elapsed: int = 0):
         self._source = source
@@ -366,13 +366,13 @@ class MusicCog(commands.Cog):
             logging.info("Checking loop flag for channel %s", voice.channel.id)
             if self.loop_enabled[voice.channel.id]:
                 logging.info("Loop flag is set True, replaying track")
-                voice.play(AudioSourceTracked(discord.FFmpegPCMAudio(track_file)), after=_after_play)
+                voice.play(TrackedAudioSource(discord.FFmpegPCMAudio(track_file)), after=_after_play)
             else:
                 logging.info("Loop flag is set False, explicitly stopping voice playback")
                 voice.stop()
 
         # start playback
-        source = AudioSourceTracked(discord.FFmpegPCMAudio(track_file))
+        source = TrackedAudioSource(discord.FFmpegPCMAudio(track_file))
         voice.play(source, after=_after_play)
         await ctx.send(f"Now playing `{self.get_title_from_id(track_id)}`")
 
@@ -410,7 +410,7 @@ class MusicCog(commands.Cog):
         def _loop_break(_):
             if self.break_mode.get(voice.channel.id):
                 logging.info("Track has ended but %s still enabled, looping %s track", mode, mode)
-                voice.play(AudioSourceTracked(discord.FFmpegPCMAudio(break_file)), after=_loop_break)
+                voice.play(TrackedAudioSource(discord.FFmpegPCMAudio(break_file)), after=_loop_break)
 
         # toggle on/off logic
         if self.break_mode.get(voice.channel.id):
@@ -426,7 +426,7 @@ class MusicCog(commands.Cog):
                 track_title = self.get_title_from_id(track_id)
                 time_elapsed = original_track_info["timestamp"]
 
-                source = AudioSourceTracked(
+                source = TrackedAudioSource(
                     source = discord.FFmpegPCMAudio(
                         source  = self.get_track_filepath(track_id),
                         options = f"-ss {time_elapsed}"
@@ -449,7 +449,7 @@ class MusicCog(commands.Cog):
                 self.saved_track.get(voice.channel.id)["timestamp"] = voice.source.progress
                 logging.info("Wrote out timestamp %s", self.saved_track.get(voice.channel.id)["timestamp"])
 
-            voice.play(AudioSourceTracked(discord.FFmpegPCMAudio(break_file)), after=_loop_break)
+            voice.play(TrackedAudioSource(discord.FFmpegPCMAudio(break_file)), after=_loop_break)
             await ctx.send(f"{ctx.message.author.mention} Playing {mode} music `{self.get_title_from_id(track_id)}`")
 
 
